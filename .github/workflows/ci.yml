@@ -58,11 +58,11 @@ jobs:
           workspaces: source/src-tauri
           cache-on-failure: true
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v5
         with:
           package_json_file: source/package.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
