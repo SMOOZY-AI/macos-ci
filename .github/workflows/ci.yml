@@ -1,0 +1,73 @@
+name: CI (manual sanity check)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: "Also run inherited Vitest suite"
+        type: boolean
+        default: false
+        required: false
+
+jobs:
+  sanity:
+    name: Typecheck + Build (+ optional tests)
+    runs-on: macos-14
+    timeout-minutes: 35
+    env:
+      GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+
+    steps:
+      - name: Clone source from GitLab
+        shell: bash
+        run: |
+          if [ -z "$GITLAB_TOKEN" ]; then
+            echo "::error::GITLAB_TOKEN secret is missing"
+            exit 1
+          fi
+
+          git clone --depth 1 \
+            "https://oauth2:${GITLAB_TOKEN}@gitlab.com/smoozy-app/smoozy-2.git" \
+            source
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: source/src-tauri
+          cache-on-failure: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: source/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: source/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: source
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: source
+        run: pnpm typecheck
+
+      - name: Frontend build
+        working-directory: source
+        run: pnpm build
+
+      - name: Cargo check
+        working-directory: source/src-tauri
+        run: cargo check
+
+      - name: Test
+        if: ${{ inputs.run_tests }}
+        working-directory: source
+        run: pnpm test

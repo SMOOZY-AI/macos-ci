@@ -1,0 +1,161 @@
+name: Release macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        type: choice
+        options:
+          - patch
+          - minor
+        default: patch
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    name: "Release macOS (${{ inputs.bump }})"
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+      GITLAB_DEPLOY_TOKEN_USERNAME: ${{ secrets.GITLAB_DEPLOY_TOKEN_USERNAME }}
+      GITLAB_DEPLOY_TOKEN_PASSWORD: ${{ secrets.GITLAB_DEPLOY_TOKEN_PASSWORD }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      UPDATE_SECRET: ${{ secrets.UPDATE_SECRET }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+      APPLE_API_KEY_PATH: /tmp/AuthKey.p8
+
+    steps:
+      - name: Clone source from GitLab
+        shell: bash
+        run: |
+          if [ -z "$GITLAB_TOKEN" ]; then
+            echo "::error::GITLAB_TOKEN secret is missing — cannot clone source"
+            exit 1
+          fi
+
+          git clone \
+            "https://oauth2:${GITLAB_TOKEN}@gitlab.com/smoozy-app/smoozy-2.git" \
+            source
+
+          cd source
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "Cloned $(git rev-parse --short HEAD) from GitLab"
+
+      - name: Import Apple certificate & API key
+        shell: bash
+        run: |
+          echo "$APPLE_API_KEY_CONTENT" > "$APPLE_API_KEY_PATH"
+
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          rm "$CERT_PATH"
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: source/src-tauri
+          cache-on-failure: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: source/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: source/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: source
+        run: pnpm install --frozen-lockfile
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Build and release
+        working-directory: source
+        shell: bash
+        run: |
+          BUMP_FLAG=""
+          if [ "${{ inputs.bump }}" = "patch" ]; then
+            BUMP_FLAG="--patch"
+          fi
+          node scripts/bump-release.mjs $BUMP_FLAG --no-password
+
+      - name: Commit and push version bump to GitLab
+        if: success()
+        working-directory: source
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          if git diff --cached --quiet; then
+            echo "No version changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: release $VERSION"
+
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              echo "Pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "Push rejected on attempt $attempt — rebasing on origin/main"
+            git fetch origin main
+            if ! git rebase origin/main; then
+              git rebase --abort
+              echo "::error::Unexpected rebase conflict on version bump — aborting"
+              exit 1
+            fi
+          done
+
+          echo "::error::Failed to push version bump after 5 attempts"
+          exit 1
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoozy-macos-${{ inputs.bump }}
+          path: |
+            source/src-tauri/target/release/bundle/macos/*.dmg
+            source/src-tauri/target/release/bundle/macos/*.app.tar.gz
+            source/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+          retention-days: 14
+          if-no-files-found: warn
