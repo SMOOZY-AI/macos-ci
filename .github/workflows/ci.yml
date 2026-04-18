@@ -14,21 +14,38 @@ jobs:
     name: Typecheck + Build (+ optional tests)
     runs-on: macos-14
     timeout-minutes: 35
-    env:
-      GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
 
     steps:
-      - name: Clone source from GitLab
+      - name: Configure GitLab SSH key
         shell: bash
         run: |
-          if [ -z "$GITLAB_TOKEN" ]; then
-            echo "::error::GITLAB_TOKEN secret is missing"
+          if [ -z "${{ secrets.GITLAB_SSH_PRIVATE_KEY }}" ]; then
+            echo "::error::GITLAB_SSH_PRIVATE_KEY secret is missing"
             exit 1
           fi
 
-          git clone --depth 1 \
-            "https://oauth2:${GITLAB_TOKEN}@gitlab.com/smoozy-app/smoozy-2.git" \
-            source
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          cat <<'EOF' > ~/.ssh/smoozy_gitlab
+          ${{ secrets.GITLAB_SSH_PRIVATE_KEY }}
+          EOF
+          chmod 600 ~/.ssh/smoozy_gitlab
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          cat <<'EOF' > ~/.ssh/config
+          Host gitlab.com
+            HostName gitlab.com
+            User git
+            IdentityFile ~/.ssh/smoozy_gitlab
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Clone source from GitLab
+        shell: bash
+        run: |
+          git clone --depth 1 git@gitlab.com:smoozy-app/smoozy-2.git source
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

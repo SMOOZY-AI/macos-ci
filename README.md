@@ -22,7 +22,7 @@ This GitHub repository contains **only GitHub Actions workflows**. It has no app
 │ - issues, MRs, code review     │     │   (no application code)     │
 └──────────┬─────────────────────┘     └──────────┬──────────────────┘
            │                                      │
-           │  git clone with GITLAB_TOKEN         │  workflow_dispatch
+           │  git clone with SSH deploy key       │  workflow_dispatch
            └──────────────────────────────────────┘  triggers
                                 │
                                 ▼
@@ -62,7 +62,8 @@ Add these in GitHub -> Settings -> Secrets and variables -> Actions:
 
 | Secret | Purpose |
 |---|---|
-| `GITLAB_TOKEN` | Clone source + push version bump back to GitLab |
+| `GITLAB_SSH_PRIVATE_KEY` | Clone source + push version bump back to GitLab over SSH |
+| `GITLAB_TOKEN` | GitLab API access for release creation |
 | `GITLAB_DEPLOY_TOKEN_USERNAME` | Upload artifacts to GitLab Package Registry |
 | `GITLAB_DEPLOY_TOKEN_PASSWORD` | Same deploy token, token value |
 | `TAURI_SIGNING_PRIVATE_KEY` | Sign updater artifacts with the existing minisign key |
@@ -79,3 +80,4 @@ Add these in GitHub -> Settings -> Secrets and variables -> Actions:
 - Keep the updater signing key identical to the current app. Regenerating it would break auto-updates for existing users.
 - This repo is intentionally public and intentionally contains no source code.
 - The optional Vitest run currently mirrors the original repo's baseline, including a small set of inherited red tests.
+- GitHub Actions talks to the private GitLab source repo over a dedicated SSH deploy key, not over the broken local HTTPS Git token.
