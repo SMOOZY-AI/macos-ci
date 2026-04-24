@@ -4,7 +4,7 @@ CI/CD pipeline for the extracted **Smoozy macOS** app.
 
 The actual application source lives in a **private GitLab repository**:
 
-- `https://gitlab.com/smoozy-app/smoozy-2`
+- `https://gitlab.com/smoozy-app/smoozy-macos`
 
 This GitHub repository contains **only GitHub Actions workflows**. It has no application code. Its only job is to give us a public Actions repo while the real macOS source stays private on GitLab.
 
@@ -14,7 +14,7 @@ This GitHub repository contains **only GitHub Actions workflows**. It has no app
 ┌────────────────────────────────┐     ┌─────────────────────────────┐
 │ GitLab (private)               │     │ GitHub (this repo, public)  │
 │ gitlab.com/smoozy-app/         │     │ Smoozy-LLC/smoozy-macos-ci  │
-│   smoozy-2                     │     │                             │
+│   smoozy-macos                 │     │                             │
 │                                │     │   .github/workflows/        │
 │ - all source code              │     │   release.yml               │
 │ - all commits (incl. version   │     │   ci.yml                    │

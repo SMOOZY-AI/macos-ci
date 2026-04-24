@@ -67,7 +67,7 @@ jobs:
       - name: Clone source from GitLab
         shell: bash
         run: |
-          git clone git@gitlab.com:smoozy-app/smoozy-2.git source
+          git clone git@gitlab.com:smoozy-app/smoozy-macos.git source
 
           cd source
           git config user.name "github-actions[bot]"

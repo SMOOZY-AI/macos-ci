@@ -45,7 +45,7 @@ jobs:
       - name: Clone source from GitLab
         shell: bash
         run: |
-          git clone --depth 1 git@gitlab.com:smoozy-app/smoozy-2.git source
+          git clone --depth 1 git@gitlab.com:smoozy-app/smoozy-macos.git source
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
