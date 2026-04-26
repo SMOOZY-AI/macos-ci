@@ -93,13 +93,14 @@ jobs:
           if [ "$has_api_auth" = true ]; then
             printf '%s' "$APPLE_API_KEY_CONTENT" > "$APPLE_API_KEY_PATH"
             chmod 600 "$APPLE_API_KEY_PATH"
-            # Force API-key path: clear Apple ID vars so Tauri can't fall back to a
-            # potentially locked Apple ID account. $GITHUB_ENV mutates env for all
-            # subsequent steps in this job.
+            # Force API-key path: clear the password-based auth pair so Tauri can't
+            # fall back to a potentially locked Apple ID account. APPLE_TEAM_ID is
+            # kept — Tauri validates it as ≥3 chars unconditionally (used in code-
+            # sign identity selection, not in the notarytool credentials choice).
+            # $GITHUB_ENV mutates env for all subsequent steps in this job.
             {
               echo "APPLE_ID="
               echo "APPLE_PASSWORD="
-              echo "APPLE_TEAM_ID="
             } >> "$GITHUB_ENV"
             echo "Resolved notarization auth: App Store Connect API key"
           elif [ "$has_apple_id_auth" = true ]; then
