@@ -161,21 +161,25 @@ jobs:
       - name: Build and release
         working-directory: source
         shell: bash
-        # Step-level env wins over job-level env. Per the resolved auth method,
-        # blank out the unused credential set so Tauri sees an unambiguous path:
-        #   api-key  → APPLE_ID/APPLE_PASSWORD blanked → Tauri uses .p8 + JWT
-        #   apple-id → APPLE_API_KEY/ISSUER/PATH blanked → Tauri uses notarytool
-        #              with --apple-id/--password/--team-id
-        # Without this, a job-level APPLE_ID stays set even after $GITHUB_ENV
-        # blanking in earlier steps (job env shadows GITHUB_ENV updates), and
-        # Tauri may pick the wrong path or send stale credentials.
-        env:
-          APPLE_ID: ${{ steps.auth_resolve.outputs.method == 'apple-id' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ steps.auth_resolve.outputs.method == 'apple-id' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_API_KEY: ${{ steps.auth_resolve.outputs.method == 'api-key' && secrets.APPLE_API_KEY_ID || '' }}
-          APPLE_API_ISSUER: ${{ steps.auth_resolve.outputs.method == 'api-key' && secrets.APPLE_API_ISSUER || '' }}
-          APPLE_API_KEY_PATH: ${{ steps.auth_resolve.outputs.method == 'api-key' && '/tmp/AuthKey.p8' || '' }}
         run: |
+          set -e
+
+          # Hard-unset the opposite credential set so Tauri-bundler can't probe
+          # it. Setting to empty string via env: isn't enough — Tauri 2.x treats
+          # APPLE_ID="" as "Apple ID auth is configured" because the var exists
+          # in the process environment, then sends empty creds to notarytool
+          # and Apple returns 401 "Invalid credentials".
+          # `unset` removes the var from the bash environment so the spawned
+          # `pnpm tauri:build` process inherits an environment where the var
+          # genuinely doesn't exist.
+          if [ "${{ steps.auth_resolve.outputs.method }}" = "api-key" ]; then
+            unset APPLE_ID APPLE_PASSWORD
+            echo "Build env: API-key path (APPLE_ID/PASSWORD unset)"
+          elif [ "${{ steps.auth_resolve.outputs.method }}" = "apple-id" ]; then
+            unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
+            echo "Build env: Apple-ID path (APPLE_API_* unset)"
+          fi
+
           BUMP_FLAG=""
           if [ "${{ inputs.bump }}" = "patch" ]; then
             BUMP_FLAG="--patch"
