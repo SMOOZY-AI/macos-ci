@@ -92,9 +92,24 @@ jobs:
 
           if [ "$has_api_auth" = true ]; then
             printf '%s' "$APPLE_API_KEY_CONTENT" > "$APPLE_API_KEY_PATH"
+            chmod 600 "$APPLE_API_KEY_PATH"
+            # Force API-key path: clear Apple ID vars so Tauri can't fall back to a
+            # potentially locked Apple ID account. $GITHUB_ENV mutates env for all
+            # subsequent steps in this job.
+            {
+              echo "APPLE_ID="
+              echo "APPLE_PASSWORD="
+              echo "APPLE_TEAM_ID="
+            } >> "$GITHUB_ENV"
             echo "Resolved notarization auth: App Store Connect API key"
           elif [ "$has_apple_id_auth" = true ]; then
             rm -f "$APPLE_API_KEY_PATH"
+            # Force Apple-ID path: clear API key vars so Tauri sees only one auth.
+            {
+              echo "APPLE_API_KEY="
+              echo "APPLE_API_ISSUER="
+              echo "APPLE_API_KEY_PATH="
+            } >> "$GITHUB_ENV"
             echo "Resolved notarization auth: Apple ID"
           else
             echo "::error::Missing Apple notarization credentials. Provide either APPLE_API_KEY_ID + APPLE_API_ISSUER + APPLE_API_KEY_CONTENT or APPLE_ID + APPLE_PASSWORD + APPLE_TEAM_ID."
