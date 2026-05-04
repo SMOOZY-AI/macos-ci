@@ -1,0 +1,123 @@
+name: Migration Guard
+
+# Runs against a feature branch in the GitLab source repo and fails if any
+# already-released migration file under migrations/ has been modified, renamed,
+# or deleted. Migrations are release-frozen — once published in a tag, the
+# only valid change is to APPEND a new vNNN file. Editing an existing file
+# breaks sqlx checksums for every user already on a release that contained it.
+#
+# Manual trigger because GitHub doesn't see GitLab MRs directly. Reviewer is
+# expected to run this workflow against the candidate branch before approving.
+# Mirroring this check into .gitlab-ci.yml on the source side is recommended
+# follow-up work.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Source branch to audit (defaults to main if empty)"
+        type: string
+        required: false
+      base:
+        description: "Base ref to diff against"
+        type: string
+        required: false
+        default: "main"
+
+jobs:
+  guard:
+    name: Verify migrations are append-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Configure GitLab SSH key
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.GITLAB_SSH_PRIVATE_KEY }}" ]; then
+            echo "::error::GITLAB_SSH_PRIVATE_KEY secret is missing"
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          cat <<'EOF' > ~/.ssh/smoozy_gitlab
+          ${{ secrets.GITLAB_SSH_PRIVATE_KEY }}
+          EOF
+          chmod 600 ~/.ssh/smoozy_gitlab
+          ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          cat <<'EOF' > ~/.ssh/config
+          Host gitlab.com
+            HostName gitlab.com
+            User git
+            IdentityFile ~/.ssh/smoozy_gitlab
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Clone source (full history)
+        shell: bash
+        run: |
+          git clone git@gitlab.com:smoozy-app/smoozy-macos.git source
+
+      - name: Resolve refs
+        id: refs
+        working-directory: source
+        shell: bash
+        run: |
+          BRANCH="${{ inputs.branch }}"
+          BASE="${{ inputs.base }}"
+          if [ -z "$BRANCH" ]; then BRANCH="main"; fi
+          if [ -z "$BASE" ]; then BASE="main"; fi
+          git fetch origin "$BRANCH" "$BASE"
+          git checkout "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Verify migrations append-only
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="${{ steps.refs.outputs.branch }}"
+          BASE="${{ steps.refs.outputs.base }}"
+
+          echo "Diffing migrations/ between origin/$BASE and $BRANCH"
+          # --diff-filter excludes Added; anything that surfaces here is a
+          # forbidden Modify / Rename / Delete / Copy.
+          forbidden=$(git diff --name-status --diff-filter=MRDC \
+              "origin/$BASE...$BRANCH" -- 'migrations/*.sql' || true)
+
+          if [ -n "$forbidden" ]; then
+            echo "::error::Released migrations were modified, renamed, or deleted:"
+            echo "$forbidden"
+            echo ""
+            echo "Migration files in migrations/*.sql are release-frozen."
+            echo "Once a file ships in a tag, its content is part of every"
+            echo "user's _sqlx_migrations checksum. Editing it (even"
+            echo "comments/whitespace) breaks app launch for everyone on a"
+            echo "previous release — sqlx will refuse to apply later"
+            echo "migrations because the stored checksum no longer matches."
+            echo ""
+            echo "If you need to change schema:"
+            echo "  1. Add a NEW file: migrations/v\$NEXT-<description>.sql"
+            echo "  2. Mirror its CREATE/ALTER/INDEX in pre_migrate() in"
+            echo "     src-tauri/src/db_migrate.rs (idempotent)."
+            echo "  3. Append a new tuple in db_migrate::healed_entries()."
+            echo "  4. Add a fixture or test case in"
+            echo "     src-tauri/tests/migrations.rs covering the migration."
+            echo ""
+            echo "See CLAUDE.md \"Migrations\" for the full discipline."
+            exit 1
+          fi
+
+          added=$(git diff --name-status --diff-filter=A \
+              "origin/$BASE...$BRANCH" -- 'migrations/*.sql' || true)
+          if [ -n "$added" ]; then
+            echo "OK: only Added migration files in this branch:"
+            echo "$added"
+          else
+            echo "OK: no migration changes in this branch."
+          fi
