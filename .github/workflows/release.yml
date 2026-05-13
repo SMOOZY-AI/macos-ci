@@ -135,6 +135,22 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
+      - name: Pin cargo from rustup toolchain
+        # macos-14 runners ship Apple CommandLineTools which include a stub
+        # `cargo` at /Library/Developer/CommandLineTools/usr/bin/cargo that is
+        # actually `rustup-init`. PATH ordering puts that stub before
+        # ~/.cargo/bin from dtolnay/rust-toolchain, so tauri-cli's invocation
+        # of `cargo metadata` resolves to the stub and exits with
+        # "unexpected argument 'metadata'". Prepending ~/.cargo/bin via
+        # GITHUB_PATH keeps the real cargo (and rustc / rustup) authoritative
+        # for every subsequent step.
+        shell: bash
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "which cargo: $(which cargo)"
+          cargo --version
+
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
