@@ -52,6 +52,24 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
+      - name: Pin cargo from rustup toolchain
+        # macos-14 ships a rustup-init stub at
+        # /Library/Developer/CommandLineTools/usr/bin/cargo that hijacks `cargo`
+        # calls when PATH ordering puts CommandLineTools ahead of ~/.cargo/bin.
+        # tauri-cli and `cargo check` both spawn `cargo metadata`, which then
+        # errors with "unexpected argument 'metadata'". Nuke the shim files so
+        # nothing can collide with the real toolchain regardless of PATH order.
+        shell: bash
+        run: |
+          set -e
+          for f in cargo rustc rustdoc rustup; do
+            sudo rm -f "/Library/Developer/CommandLineTools/usr/bin/$f"
+          done
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "which cargo: $(which cargo)"
+          cargo --version
+
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
@@ -82,7 +100,10 @@ jobs:
 
       - name: Cargo check
         working-directory: source/src-tauri
-        run: cargo check
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo check
 
       - name: Test
         if: ${{ inputs.run_tests }}

@@ -141,11 +141,20 @@ jobs:
         # actually `rustup-init`. PATH ordering puts that stub before
         # ~/.cargo/bin from dtolnay/rust-toolchain, so tauri-cli's invocation
         # of `cargo metadata` resolves to the stub and exits with
-        # "unexpected argument 'metadata'". Prepending ~/.cargo/bin via
-        # GITHUB_PATH keeps the real cargo (and rustc / rustup) authoritative
-        # for every subsequent step.
+        # "unexpected argument 'metadata'".
+        #
+        # GITHUB_PATH prepend alone is not enough: later setup-actions
+        # (setup-node, pnpm/action-setup, brew install) also write to
+        # GITHUB_PATH and prepend their own bins, eventually re-burying
+        # ~/.cargo/bin behind /Library/Developer/CommandLineTools/usr/bin
+        # via reordering. Nuke the shim files so there's literally nothing
+        # to collide with, regardless of PATH order.
         shell: bash
         run: |
+          set -e
+          for f in cargo rustc rustdoc rustup; do
+            sudo rm -f "/Library/Developer/CommandLineTools/usr/bin/$f"
+          done
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.cargo/bin:$PATH"
           echo "which cargo: $(which cargo)"
@@ -179,6 +188,13 @@ jobs:
         shell: bash
         run: |
           set -e
+
+          # Belt + suspenders against macos-14 PATH ordering. The "Pin cargo"
+          # step removes the Apple shim and writes ~/.cargo/bin to GITHUB_PATH,
+          # but later setup-actions can reorder. Force cargo bin to the front
+          # of the shell that spawns `pnpm tauri:build` -> `cargo metadata`.
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "cargo resolved at: $(which cargo)"
 
           # Hard-unset the opposite credential set so Tauri-bundler can't probe
           # it. Setting to empty string via env: isn't enough — Tauri 2.x treats
