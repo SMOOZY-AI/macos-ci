@@ -47,28 +47,27 @@ jobs:
         run: |
           git clone --depth 1 git@gitlab.com:smoozy-app/smoozy-macos.git source
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-
-      - name: Pin cargo from rustup toolchain
-        # macos-14 ships a rustup-init stub at
-        # /Library/Developer/CommandLineTools/usr/bin/cargo that hijacks `cargo`
-        # calls when PATH ordering puts CommandLineTools ahead of ~/.cargo/bin.
-        # tauri-cli and `cargo check` both spawn `cargo metadata`, which then
-        # errors with "unexpected argument 'metadata'". Nuke the shim files so
-        # nothing can collide with the real toolchain regardless of PATH order.
+      - name: Install Rust (clean install via rustup-init)
+        # See release.yml for the full rationale. tl;dr: dtolnay's install
+        # on macos-14 has been leaving partial rustup state behind so the
+        # `cargo` proxy at ~/.cargo/bin/ is actually rustup-init in
+        # installer mode. We wipe state and install fresh, then verify
+        # before letting the cache / build steps run.
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          rm -rf "$HOME/.cargo" "$HOME/.rustup"
           for f in cargo rustc rustdoc rustup; do
             sudo rm -f "/Library/Developer/CommandLineTools/usr/bin/$f"
           done
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --no-modify-path --default-toolchain stable \
+                        --target aarch64-apple-darwin --profile minimal
+          echo "── cargo binary type ──"
+          file "$HOME/.cargo/bin/cargo"
+          "$HOME/.cargo/bin/cargo" --version
+          "$HOME/.cargo/bin/rustc" --version
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.cargo/bin:$PATH"
-          echo "which cargo: $(which cargo)"
-          cargo --version
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -102,6 +101,7 @@ jobs:
         working-directory: source/src-tauri
         shell: bash
         run: |
+          export CARGO="$HOME/.cargo/bin/cargo"
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo check
 
