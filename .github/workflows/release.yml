@@ -130,10 +130,56 @@ jobs:
 
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
+      - name: Install Rust (clean install via rustup-init)
+        # Earlier iterations used dtolnay/rust-toolchain@stable + PATH-prepend,
+        # then layered a sudo-rm of the Apple CommandLineTools cargo shim on
+        # top. Both kept failing: even with the Apple shim gone and
+        # `which cargo` printing /Users/runner/.cargo/bin/cargo from inside
+        # the build step, `tauri build` still invoked `cargo metadata` and
+        # got rustup-init's help banner back.
+        #
+        # The remaining culprit is the binary AT $HOME/.cargo/bin/cargo
+        # itself: dtolnay's install on macos-14 has been leaving partial
+        # / unconfigured rustup state behind (a rustup-init blob renamed
+        # cargo, not the rustup multi-call proxy). The only reliable fix is
+        # to wipe ~/.cargo and ~/.rustup, then run rustup-init.sh ourselves
+        # and verify the resulting binary with `file` and `cargo --version`
+        # BEFORE letting the rest of the workflow touch it.
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Wipe any partial rustup state from the runner image so we install
+          # into a known-clean tree.
+          rm -rf "$HOME/.cargo" "$HOME/.rustup"
+
+          # Remove Apple CommandLineTools rustup-init shims as well — even
+          # though they're no longer hijacking us (PATH-wise), having them
+          # around invites future regressions.
+          for f in cargo rustc rustdoc rustup; do
+            sudo rm -f "/Library/Developer/CommandLineTools/usr/bin/$f"
+          done
+
+          # Install rustup + stable + the aarch64-apple-darwin target. The
+          # --no-modify-path flag stops rustup-init from touching shell rc
+          # files (we manage PATH via GITHUB_PATH below). --profile minimal
+          # skips rust-docs to shave a few hundred MB and seconds.
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --no-modify-path --default-toolchain stable \
+                        --target aarch64-apple-darwin --profile minimal
+
+          # Sanity-prove the cargo we are about to put on PATH is the real
+          # rustup proxy, not another rustup-init blob. If `file` reveals
+          # anything other than a Mach-O executable, or `cargo --version`
+          # exits non-zero, fail fast here instead of 10 minutes into the
+          # build at `cargo metadata`.
+          echo "── cargo binary type ──"
+          file "$HOME/.cargo/bin/cargo"
+          echo "── cargo version ──"
+          "$HOME/.cargo/bin/cargo" --version
+          "$HOME/.cargo/bin/rustc" --version
+
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -163,6 +209,14 @@ jobs:
         shell: bash
         run: |
           set -e
+
+          # Belt + suspenders against macos-14 PATH ordering AND tauri-cli's
+          # cargo lookup. `cargo_metadata` (used internally by tauri-cli)
+          # honours $CARGO if set — making this absolute path bulletproof
+          # against PATH being clobbered by any intermediate setup-action.
+          export CARGO="$HOME/.cargo/bin/cargo"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "cargo resolved at: $(which cargo) (CARGO=$CARGO)"
 
           # Hard-unset the opposite credential set so Tauri-bundler can't probe
           # it. Setting to empty string via env: isn't enough — Tauri 2.x treats
