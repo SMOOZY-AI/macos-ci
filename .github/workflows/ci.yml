@@ -45,7 +45,7 @@ jobs:
       - name: Clone source from GitLab
         shell: bash
         run: |
-          git clone --depth 1 git@gitlab.com:smoozy-app/smoozy-macos.git source
+          git clone --depth 1 git@gitlab.com:smoozy-ai/mac.git source
 
       - name: Install Rust (clean install via rustup-init)
         # See release.yml for the full rationale. tl;dr: dtolnay's install
