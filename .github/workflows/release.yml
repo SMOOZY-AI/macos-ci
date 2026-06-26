@@ -11,6 +11,11 @@ on:
           - minor
         default: patch
         required: true
+      notarize:
+        description: "Notarize with Apple (нужно действующее соглашение в кабинете)"
+        type: boolean
+        default: false
+        required: true
 
 permissions:
   contents: write
@@ -79,6 +84,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Notarization talks to Apple's notary service in real time and needs
+          # an in-effect Program License Agreement. When the account can't accept
+          # an updated agreement (e.g. locked), set notarize=false: we still sign
+          # with the Developer ID cert (works offline) and just skip notarizing.
+          if [ "${{ inputs.notarize }}" != "true" ]; then
+            echo "method=none" >> "$GITHUB_OUTPUT"
+            echo "Notarization disabled by input — will sign without notarizing"
+            exit 0
+          fi
 
           has_api_auth=false
           has_apple_id_auth=false
@@ -232,6 +247,14 @@ jobs:
           elif [ "${{ steps.auth_resolve.outputs.method }}" = "apple-id" ]; then
             unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
             echo "Build env: Apple-ID path (APPLE_API_* unset)"
+          elif [ "${{ steps.auth_resolve.outputs.method }}" = "none" ]; then
+            # Strip every notary credential so Tauri-bundler signs but does NOT
+            # attempt notarization. Empty strings aren't enough — Tauri 2.x treats
+            # a present-but-empty APPLE_ID as "configured" and then 401s; unset
+            # removes the var from the spawned tauri:build environment entirely.
+            unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+            unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_CONTENT APPLE_API_KEY_PATH
+            echo "Build env: signing only, notarization skipped"
           fi
 
           BUMP_FLAG=""
