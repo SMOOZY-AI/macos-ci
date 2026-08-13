@@ -11,7 +11,7 @@ on:
 
 jobs:
   sanity:
-    name: Typecheck + Build (+ optional tests)
+    name: Typecheck + Build + native tests (+ optional Vitest)
     runs-on: macos-14
     timeout-minutes: 35
 
@@ -104,6 +104,39 @@ jobs:
           export CARGO="$HOME/.cargo/bin/cargo"
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo check
+
+      # The native halves have unit tests and nothing was running them. Not
+      # behind `run_tests`: that input is about the Vitest suite, which is the
+      # slow one — these two take seconds against a tree that is already built
+      # by the steps above, and they cover the code with no other safety net
+      # (the Swift player has no test target anywhere else, and every
+      # silent-playback defect this client has had lived in it).
+      - name: Rust unit tests
+        working-directory: source/src-tauri
+        shell: bash
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo test --lib
+
+      - name: Select the newest Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The Swift suite is swift-testing, which ships with Xcode 16+ (and
+          # with the Command Line Tools on a dev machine). The runner image
+          # carries several Xcodes and its default is not always the newest, so
+          # pick explicitly rather than discover it through a compile error.
+          latest="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -n "$latest" ]; then
+            sudo xcode-select -s "$latest"
+          fi
+          xcode-select -p
+          swift --version
+
+      - name: Swift tests
+        working-directory: source/src-tauri/swift
+        shell: bash
+        run: ./test.sh
 
       - name: Test
         if: ${{ inputs.run_tests }}
