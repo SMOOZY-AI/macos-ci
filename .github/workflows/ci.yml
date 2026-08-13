@@ -2,16 +2,10 @@ name: CI (manual sanity check)
 
 on:
   workflow_dispatch:
-    inputs:
-      run_tests:
-        description: "Also run inherited Vitest suite"
-        type: boolean
-        default: false
-        required: false
 
 jobs:
   sanity:
-    name: Typecheck + Build + native tests (+ optional Vitest)
+    name: Typecheck + Build + tests
     runs-on: macos-14
     timeout-minutes: 35
 
@@ -138,7 +132,6 @@ jobs:
         shell: bash
         run: ./test.sh
 
-      - name: Test
-        if: ${{ inputs.run_tests }}
+      - name: Frontend tests
         working-directory: source
         run: pnpm test

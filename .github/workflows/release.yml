@@ -223,10 +223,6 @@ jobs:
       # producing are the silent kind, where the app starts, the UI looks right,
       # and one channel of audio quietly stops working.
       #
-      # These are the two suites that are green and fast. `pnpm test` (Vitest)
-      # is NOT here yet on purpose: it carries one long-standing failure in
-      # tests/context/context-store.test.ts, so gating on it today would block
-      # every release until that test is fixed rather than catch anything new.
       - name: Typecheck
         working-directory: source
         run: pnpm typecheck
@@ -255,6 +251,10 @@ jobs:
         working-directory: source/src-tauri/swift
         shell: bash
         run: ./test.sh
+
+      - name: Frontend tests
+        working-directory: source
+        run: pnpm test
 
       - name: Install create-dmg
         run: brew install create-dmg
