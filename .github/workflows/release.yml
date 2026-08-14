@@ -227,6 +227,24 @@ jobs:
         working-directory: source
         run: pnpm typecheck
 
+      # A PREREQUISITE OF THE RUST TESTS, not a separate check — do not reorder
+      # this below them to save a minute.
+      #
+      # `cargo test --lib` compiles the whole lib, and the lib contains
+      # `tauri::generate_context!()`, which embeds the frontend bundle and
+      # panics at macro-expansion time when `frontendDist` ("../dist") is
+      # missing. The release build produces that directory itself, much later,
+      # via `beforeBuildCommand` — so the gate ran before the thing its first
+      # step depends on existed.
+      #
+      # Invisible on any dev machine, where `dist/` is left over from the last
+      # build. It cost the first CI run this workflow ever had: `error: proc
+      # macro panicked … this path doesn't exist`, and the Swift and frontend
+      # suites never ran at all. `ci.yml` had the step; this one did not.
+      - name: Frontend build
+        working-directory: source
+        run: pnpm build
+
       - name: Rust unit tests
         working-directory: source/src-tauri
         shell: bash
