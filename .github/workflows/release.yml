@@ -23,7 +23,7 @@ permissions:
 jobs:
   release-macos:
     name: "Release macOS (${{ inputs.bump }})"
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       GITLAB_DEPLOY_TOKEN_USERNAME: ${{ secrets.GITLAB_DEPLOY_TOKEN_USERNAME }}
@@ -252,16 +252,24 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo test --lib
 
-      - name: Select the newest Xcode
+      - name: Select Xcode 16.2
         shell: bash
         run: |
           set -euo pipefail
-          # swift-testing ships with Xcode 16+; the runner image carries several
-          # versions and makes no promise about which one is default.
-          latest="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
-          if [ -n "$latest" ]; then
-            sudo xcode-select -s "$latest"
+          # Pinned, not "newest". This step runs before `tauri build`, so it
+          # picks the SDK the shipped app links against. On macos-14 "newest"
+          # was 16.2 (SDK 15.2); on macos-15 it would silently become Xcode 26,
+          # and an app linked against SDK 26 gets the new system look and
+          # AppKit behaviour on macOS 26. Moving to Xcode 26 is its own change,
+          # checked on a real Mac first — not a side effect of a runner swap.
+          # swift-testing needs Xcode 16+, which 16.2 satisfies.
+          xcode="/Applications/Xcode_16.2.app"
+          if [ ! -d "$xcode" ]; then
+            echo "::error::$xcode is not on this runner image — pick a new pin deliberately"
+            ls -d /Applications/Xcode*.app
+            exit 1
           fi
+          sudo xcode-select -s "$xcode"
           xcode-select -p
           swift --version
 

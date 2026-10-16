@@ -14,7 +14,7 @@ on:
 jobs:
   verify-notary:
     name: notarytool history probe
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 10
     env:
       APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}

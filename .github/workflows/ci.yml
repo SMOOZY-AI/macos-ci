@@ -6,7 +6,7 @@ on:
 jobs:
   sanity:
     name: Typecheck + Build + tests
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 35
 
     steps:
@@ -112,18 +112,20 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo test --lib
 
-      - name: Select the newest Xcode
+      - name: Select Xcode 16.2
         shell: bash
         run: |
           set -euo pipefail
           # The Swift suite is swift-testing, which ships with Xcode 16+ (and
-          # with the Command Line Tools on a dev machine). The runner image
-          # carries several Xcodes and its default is not always the newest, so
-          # pick explicitly rather than discover it through a compile error.
-          latest="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
-          if [ -n "$latest" ]; then
-            sudo xcode-select -s "$latest"
+          # with the Command Line Tools on a dev machine). Pinned to the same
+          # Xcode release.yml builds with — see the rationale there.
+          xcode="/Applications/Xcode_16.2.app"
+          if [ ! -d "$xcode" ]; then
+            echo "::error::$xcode is not on this runner image — pick a new pin deliberately"
+            ls -d /Applications/Xcode*.app
+            exit 1
           fi
+          sudo xcode-select -s "$xcode"
           xcode-select -p
           swift --version
 
