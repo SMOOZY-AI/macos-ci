@@ -16,13 +16,35 @@ on:
         type: boolean
         default: false
         required: true
+      # Which build to ship (W2, epic west-market-product). `ru` is the release
+      # as it has always run. `west` re-builds the LAST Russian release commit
+      # (`chore: release <version>` on main) as the west build: own update
+      # channel, own updater key (TAURI_SIGNING_PRIVATE_KEY_WEST /
+      # TAURI_SIGNING_PRIVATE_KEY_PASSWORD_WEST secrets), own GitLab package and
+      # downloads record — see source/scripts/release-flavors.mjs. It never bumps
+      # the version and never pushes; `bump` is ignored for it. It requires
+      # notarize=true. Run it after the Russian release of the same version.
+      flavor:
+        description: "Build flavor: ru (bump + release) or west (re-build the last ru release as the west build; needs notarize)"
+        type: choice
+        options:
+          - ru
+          - west
+        default: ru
+        required: true
 
 permissions:
   contents: write
 
+# Releases run one at a time: two runs on the same version would race on the
+# version bump, the GitLab package and the update manifest.
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
 jobs:
   release-macos:
-    name: "Release macOS (${{ inputs.bump }})"
+    name: "Release macOS (${{ inputs.flavor }}, ${{ inputs.bump }})"
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -43,6 +65,15 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
+      # A west user's first install comes from the DMG with no Russian build to
+      # trust it — without notarization Gatekeeper blocks it.
+      - name: West build requires notarization
+        if: inputs.flavor == 'west' && inputs.notarize != true
+        shell: bash
+        run: |
+          echo "::error::flavor=west needs notarize=true"
+          exit 1
+
       - name: Configure GitLab SSH key
         shell: bash
         run: |
@@ -78,6 +109,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           echo "Cloned $(git rev-parse --short HEAD) from GitLab"
+
+      # The west build is the Russian release of the current version, re-built:
+      # same commit, so both channels ship the same code under the same number.
+      - name: Check out the last release commit (west)
+        if: inputs.flavor == 'west'
+        working-directory: source
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          SHA=$(git log --format='%H%x09%s' | awk -F'\t' -v s="chore: release $VERSION" '$2 == s { print $1; exit }')
+          if [ -z "$SHA" ]; then
+            echo "::error::No 'chore: release $VERSION' commit on main — run the ru release first"
+            exit 1
+          fi
+          git checkout --detach "$SHA"
+          # A release cut before W2 has a release.mjs that silently ignores
+          # --flavor: it would do a RUSSIAN release (Russian package, manifest and
+          # downloads record) signed with the west key. Refuse it outright.
+          if [ ! -f scripts/release-flavors.mjs ] || ! grep -q "release-flavors.mjs" scripts/release.mjs; then
+            echo "::error::Release $VERSION predates the west build (no scripts/release-flavors.mjs) — cut a ru release with W2 first"
+            exit 1
+          fi
+          echo "::notice::West build of $VERSION from $(git rev-parse --short HEAD)"
 
       - name: Resolve Apple notarization auth
         id: auth_resolve
@@ -288,6 +342,9 @@ jobs:
       - name: Build and release
         working-directory: source
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_WEST: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_WEST }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_WEST: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD_WEST }}
         run: |
           set -e
 
@@ -323,6 +380,17 @@ jobs:
             echo "Build env: signing only, notarization skipped"
           fi
 
+          if [ "${{ inputs.flavor }}" = "west" ]; then
+            # Own key from the _WEST secrets; no --no-password, ever: it would sign
+            # with the Russian key baked into release.mjs (the script refuses it
+            # for west anyway). A missing secret stops the run in preflight,
+            # before anything is built or uploaded.
+            export TAURI_SIGNING_PRIVATE_KEY="$TAURI_SIGNING_PRIVATE_KEY_WEST"
+            export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_WEST"
+            node scripts/release.mjs --flavor west
+            exit 0
+          fi
+
           BUMP_FLAG=""
           if [ "${{ inputs.bump }}" = "patch" ]; then
             BUMP_FLAG="--patch"
@@ -330,7 +398,7 @@ jobs:
           node scripts/bump-release.mjs $BUMP_FLAG --no-password
 
       - name: Commit and push version bump to GitLab
-        if: success()
+        if: success() && inputs.flavor == 'ru'
         working-directory: source
         shell: bash
         run: |
@@ -364,7 +432,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smoozy-macos-${{ inputs.bump }}
+          name: smoozy-macos-${{ inputs.flavor }}-${{ inputs.bump }}
           path: |
             source/src-tauri/target/release/bundle/macos/*.dmg
             source/src-tauri/target/release/bundle/macos/*.app.tar.gz

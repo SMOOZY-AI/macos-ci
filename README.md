@@ -68,6 +68,8 @@ Add these in GitHub -> Settings -> Secrets and variables -> Actions:
 | `GITLAB_DEPLOY_TOKEN_PASSWORD` | Same deploy token, token value |
 | `TAURI_SIGNING_PRIVATE_KEY` | Sign updater artifacts with the existing minisign key |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Minisign passphrase |
+| `TAURI_SIGNING_PRIVATE_KEY_WEST` | Sign updater artifacts of the **west** build (`flavor: west`) — its own key pair (key id `3EA2495B90742A8E`, pubkey in `src-tauri/tauri.west.conf.json`), same key as in `windows-ci`. `release.mjs` checks the key id against the pubkey and stops on a mismatch |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD_WEST` | Passphrase for the west key |
 | `UPDATE_SECRET` | Bearer token for backend updater publish |
 | `APPLE_CERTIFICATE_BASE64` | Developer ID `.p12` in base64 |
 | `APPLE_CERTIFICATE_PASSWORD` | Password for the `.p12` certificate |
@@ -81,3 +83,9 @@ Add these in GitHub -> Settings -> Secrets and variables -> Actions:
 - This repo is intentionally public and intentionally contains no source code.
 - The optional Vitest run currently mirrors the original repo's baseline, including a small set of inherited red tests.
 - GitHub Actions talks to the private GitLab source repo over a dedicated SSH deploy key, not over the broken local HTTPS Git token.
+
+## Flavors (W2)
+
+`flavor: ru` is the release as it always ran: bump, build, notarize (if ticked), publish, push the bump commit.
+
+`flavor: west` re-builds the last Russian release (`chore: release <version>` on GitLab `main`) as the west build — own update channel `/api/update/macos-west`, own key (`TAURI_SIGNING_PRIVATE_KEY_WEST`), package `smoozy-macos-west`, downloads record `?market=west`. No bump, no push; `bump` is ignored. It requires `notarize: true` (a west user installs from the DMG with nothing to vouch for it). Run it after the Russian release of the same version.
