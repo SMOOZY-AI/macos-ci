@@ -118,7 +118,10 @@ jobs:
         shell: bash
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          SHA=$(git log --format='%H%x09%s' | awk -F'\t' -v s="chore: release $VERSION" '$2 == s { print $1; exit }')
+          # awk reads to the end on purpose: an early `exit` closes the pipe while
+          # git log is still writing, git dies of SIGPIPE, and under the runner's
+          # `bash -e -o pipefail` that 141 fails the step (first west runs, 24.10).
+          SHA=$(git log --format='%H%x09%s' | awk -F'\t' -v s="chore: release $VERSION" '$2 == s && !found { print $1; found = 1 }')
           if [ -z "$SHA" ]; then
             echo "::error::No 'chore: release $VERSION' commit on main — run the ru release first"
             exit 1
